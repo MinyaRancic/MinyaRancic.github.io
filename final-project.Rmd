@@ -1,5 +1,5 @@
 ---
-title: "final-project"
+title: "Competitive Speedcubing Data Analysis"
 output: html_document
 ---
 
@@ -12,9 +12,9 @@ library(ggplot2)
 library(tibble)
 library(gridExtra)
 library(grid)
+library(broom)
 ```
 
-# Competetitve Speedcubing Data Analysis
 
 One thing you may not know about me is that I'm a competitive "speedcuber"! Basically, I solve various types of Rubik's cubes as fast as I can in competitions. We actually run some competitions here at UMD as well! You can find my profile [here](https://www.worldcubeassociation.org/persons/2014RANC01) and learn more here as well.
 
@@ -32,12 +32,14 @@ Luckily, the WCA has a readily made tab-separated-value file for us with every c
 
 ```{r read_data}
 results <- read.table(file = "data/WCA_export_Results.tsv", sep='\t', header=TRUE)
-head(avgRanks)
+head(results)
 ```
 
-Unfortunately, this is over 1 million observations, which is way too much data to process effectively. Furthermore, we have many data points for each person - preferable, we just want one data point per person. There are two points for each persons results - an average and a best single. I want to analyze the average here, since the single time is more dependant on luck. However, theres' two possible ways we could do this. We can either check the minimum average, which is generally what the community would prefer, or the average of the average, which might be a better metric. I will try both here! First, since there's no year column, we'll have to extract that from the competition name.
+Unfortunately, this is over 1 million observations, which is way too much data to process effectively. Furthermore, we have many data points for each person - preferable, we just want one data point per person. There are two points for each persons results - an average and a best single. I want to analyze the average here, since the single time is more dependant on luck. However, theres' two possible ways we could do this. We can either check the minimum average, which is generally what the community would prefer, or the average of the average, which might be a better metric. I will try both here! 
 
 ### Tidying and Transforming the data
+
+First, since there's no year column, we'll have to extract that from the competition name.
 
 ```{r add_year}
 results <- mutate(results, year=stringr::str_extract(competitionId, "\\d{4}"))
@@ -71,45 +73,250 @@ avg_avgs <- spread(avg_avgs, eventId, "avg") %>% select(-i) %>% ungroup()
 head(avg_avgs)
 ```
 
-Finally, we have a lot of missing attributes here. I'm going to fill these in using a regression imputation later on. I don't want to use the overall mean imputation, because it will be very inaccurate - slower people will have a lower average, while faster people will have a higher one. 
+Finally, we have a lot of missing attributes here. Unfortunately, there's not really much we can do about this. I don't want to use the overall mean imputation, because it will be very inaccurate - slower people will have a lower average, while faster people will have a higher one. Furthermore, regression imputation will not work well here - we would need to create many different models based on which data is available.
 
 ## Exploratory Data Analysis
 
-Before modelling this data, we should try to understand it. First, let's look at the distribution of times across some of the events. My prediction here is that most events will be bimodal, with a peak at beginner-level times and intermediate-tier times. That would be somewhere around 
+Before modeling this data, we should try to understand it. The best way to do this for most people is visually, so 'lets' create some visualizations of the data!
 
-```{r tidying, fig.width=12}
-samp_avg <- avg_avgs %>% drop_na('333') %>%
+### Event Distributions
+
+First, let's look at the distribution of times across some of the events. My prediction here is that most events will be bimodal, with a peak at beginner-level times and intermediate-tier times. To do this, we will create a desnity plot of each event's times. We'll also just sort the times and show them in order. This plot can show us that times are generally within a certain range, while also showing extreme outlier relative to it. You also might notice that I'm indexing my passed in dataframe in ggplot - this is an unfortunate requirement due ot the fact that my tables have numericly names columns. 
+
+```{r eda_distributions, warning=FALSE}
+samp_avg <- avg_avgs %>% 
+  drop_na('333') %>%
   arrange_at(c('333')) %>%
   rowid_to_column()
-  ggplot(samp_avg, aes(x=samp_avg$rowid, y=samp_avg$`333`)) + geom_point()
-  dist_3 <- ggplot(samp_avg, aes(x=samp_avg$'333')) + geom_histogram(bins=50)
-  dist_4 <- ggplot(samp_avg, aes(x=samp_avg$'444')) + geom_histogram(bins=50)
-  dist_5 <- ggplot(samp_avg, aes(x=samp_avg$'555')) + geom_histogram(bins=50)
-  dist_6 <- ggplot(samp_avg, aes(x=samp_avg$'666')) + geom_histogram(bins=50)
-  dist_7 <- ggplot(samp_avg, aes(x=samp_avg$'777')) + geom_histogram(bins=50)
-  dist_3oh <- ggplot(samp_avg, aes(x=samp_avg$'333oh')) + geom_histogram(bins=50)
+  ggplot(samp_avg, aes(x=samp_avg$rowid, y=samp_avg$`333`)) + geom_point() + labs(title = "Sorted average", x="rowid", y="3x3 average")
+```
+```{r eda_dist, fig.height=10, warning=FALSE}
+  dist_3 <- ggplot(samp_avg, aes(x=samp_avg$'333')) + geom_density() + labs(title = "3x3x3 Average Distribution", x="3x3x3 average")
+  dist_4 <- ggplot(samp_avg, aes(x=samp_avg$'444')) + geom_density() + labs(title = "4x4x4 Average Distribution", x="4x4x4  average")
+  dist_5 <- ggplot(samp_avg, aes(x=samp_avg$'555')) + geom_density() + labs(title = "5x5x5 Average Distribution", x="5x5x5 average")
+  dist_6 <- ggplot(samp_avg, aes(x=samp_avg$'666')) + geom_density() + labs(title = "6x6x6 Average Distribution", x="6x6x6 average")
+  dist_7 <- ggplot(samp_avg, aes(x=samp_avg$'777')) + geom_density() + labs(title = "7x7x7 Average Distribution", x="7x7x7 average")
+  dist_3oh <- ggplot(samp_avg, aes(x=samp_avg$'333oh')) + geom_density() + labs(title = "3x3x3 One Handed Average Distribution", x="7x7x7 average")
   print(grid.arrange(dist_3, dist_4, dist_5, dist_6, dist_7, dist_3oh, ncol=2, nrow = 3))
 ```
 
-These results aren't quite what I expected, but they still make sense. You can observe the following information for each event:
- * 3x3x3 - 
-    * Central tendency: ~25 seconds
-    * Spread: The overall range is large(5-200 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
-    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times.
- * 4x4x4 - ~75 seconds
-    * Central tendency: ~75 seconds
-    * Spread: The overall range is large(20-300 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
-    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times. This is more centralied, though
+
+
+Let's consider the scatter plot first.We can see that most times (40,000 of them) hover somewhere between 5 and 50 seconds. However, the "small" amount of times that happen after that begin increasing rapidly. This is just the results for the 3x3x3 cube, but you can imagine that the rest act similarly. This suggests that my initial bimodal prediction likely will not be accurate.
+
+In fact, the distribution plots confirm this. These results aren't quite what I expected, but they still make sense. You can observe the following information for each event:
+
+ * 3x3x3 -  
+    * Central tendency: ~25 seconds  
+    * Spread: The overall range is large(5-200 seconds), but the variance seems pretty small (around 5-10 seconds)  
+    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times.  
+ * 3x3x3 One Handed - 
+    * Central tendency: ~35 seconds  
+    * Spread: The overall range is large(5-200 seconds), but the variance seems pretty small (around 5-10 seconds)  
+    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times.  
+ * 4x4x4 - ~75 seconds  
+    * Central tendency: ~75 seconds  
+    * Spread: The overall range is large(20-300 seconds). The variance is till low (around 20 seconds), but clearly growing  
+    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times. This is more centralied, though  
+    
  * 5x5x5 - ~100 seconds
     * Central tendency: ~100 seconds
-    * Spread: The overall range is growing larger now(40-500 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
+    * Spread: The overall range is growing larger now(40-500 seconds), with a variance around 10 seconds
     * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times. This is more centralied, though
+
  * 6x6x6 - ~200 seconds
     * Central tendency: ~200 seconds
-    * Spread: The overall range is large(20-300 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
-    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times. This is more centralied, though
+    * Spread: The overall range is large(80-600 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
+    * Skew: This is relatively unskewed. One can argue that it's skewed towards lower times, but it's relatively minor.
+
  * 7x7x7 - ~275 seconds
     * Central tendency: ~275 seconds
-    * Spread: The overall range is large(20-300 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
+    * Spread: The overall range is large(150-700 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
     * Skew: Interestingly, this data doesn't seem too skewed at all. We have some outliers, but we're good overall
 
+Interestingly, the distrubtions for 3x3x3 and 3x3x3 One Handed are distubingly similar. However, if you look at the actual counts, much fewer people actually compete in One Handed. The reason for this is that you need some level of previous skill to even solve a cube with one hand, and it ends up not being much slower than normal solving.
+
+One thing that's really good here is that all of these distrubtions have some level of similarity! This implies that we could transform all data from one distribution into another, which is a very good sign that the model we build will be accurate!
+
+### Relationship Between Events
+
+Since we have so many events here, we need to pick one to act as a "predicted" event time. Since our resulting expression will be a linear model, it doesn't actually matter what we pick. For simplicity, let's pick the middle value of the 5x5x5 time as our predicted time. This is also nice because this is one of the most popular events.
+
+We'd then like to investigate the relationship between 5x5x5 times and every other event times. I'd like to make the following point now: I'm not actually investigating "every event." I've cut out a lot of ones that likely have little relationship, like non-cubic puzzles and blindolfed solving, mostly to make my analysis easier. The events I am analyzing is the same as above, which are the following events:
+
+ * 3x3x3
+ * 4x4x4
+ * 5x5x5
+ * 6x6x6
+ * 7x7x7
+ * 3x3x3 One Handed
+
+```{r relationships, fig.height=8, warning=FALSE}
+relate_3 <- ggplot(samp_avg, aes(x=samp_avg$'333', y=samp_avg$'555')) + geom_point() + geom_smooth(method=lm) + xlim(0, 100) + 
+  ggtitle("3x3x3 average vs. 5x5x5 average") + xlab("3x3x3 average (seconds)") + ylab("5x5x5 average (seconds)") 
+relate_4 <- ggplot(samp_avg, aes(x=samp_avg$'444', y=samp_avg$'555')) + geom_point() + geom_smooth(method=lm) + xlim(0, 250) + 
+  ggtitle("4x4x4 average vs. 5x5x5 average") + xlab("4x4x4 average (seconds)") + ylab("5x5x5 average (seconds)") 
+relate_6 <- ggplot(samp_avg, aes(x=samp_avg$'666', y=samp_avg$'555')) + geom_point() + geom_smooth(method=lm) +
+  ggtitle("6x6x6 average vs. 5x5x5 average") + xlab("6x6x6 average (seconds)") + ylab("5x5x5 average (seconds)") 
+relate_7 <- ggplot(samp_avg, aes(x=samp_avg$'777', y=samp_avg$'555')) + geom_point() + geom_smooth(method=lm) + 
+  ggtitle("7x7x7 average vs. 5x5x5 average") + xlab("7x7x7 average (seconds)") + ylab("5x5x5 average (seconds)") 
+relate_OH <- ggplot(samp_avg, aes(x=samp_avg$'333oh', y=samp_avg$'555')) + geom_point() + geom_smooth(method=lm) + xlim(0, 150) +
+  ggtitle("3x3x3 One Handed average vs. 5x5x5 average") + xlab("3x3x3 OH average (seconds)") + ylab("5x5x5 average (seconds)") 
+print(grid.arrange(relate_3, relate_4, relate_6, relate_7, relate_OH))
+```
+
+These plots are very revealing! In particular, we can see that some terms have a stronger relationship with 5x5x5 average times than others. Particularly, other big cubes, such as 6x6x6 and 7x7x7 serve as better predictors than the 3x3x3 itself does. In terms of how people solve these types of cubes, this makes a lot of sense. The general strategy for solving big cubes is to "reduce" it until you can solve it like a normal 3x3x3, which means that the majority of the solve is identical for 5x5x5-7x7x7. 
+
+Unfortunately, another factor of this is that it seems like 3x3x3 time isn't a fantastic predictor of 5x5x5 time. This gives me another idea - instead of trying to predict 5x5x5 averages for different types of inputs, lets use 3x3x3 as an input and see how we can predict different types of output averages. This is basically the same information but rephrased as a different way, and might show us how 3x3x3 average can actually be used effectively.
+
+```{r relationships333, fig.height=8, warning=FALSE}
+relate_3 <- ggplot(samp_avg, aes(x=samp_avg$'333', y=samp_avg$'444')) + geom_point() + geom_smooth(method=lm) + xlim(0, 100) + 
+  ggtitle("3x3x3 average vs. 4x4x4 average") + xlab("3x3x3 average (seconds)") + ylab("4x4x4 average (seconds)") 
+relate_4 <- ggplot(samp_avg, aes(x=samp_avg$'333', y=samp_avg$'555')) + geom_point() + geom_smooth(method=lm) + xlim(0, 250) + 
+  ggtitle("3x3x3 average vs. 5x5x5 average") + xlab("3x3x3 average (seconds)") + ylab("5x5x5 average (seconds)") 
+relate_6 <- ggplot(samp_avg, aes(x=samp_avg$'333', y=samp_avg$'666')) + geom_point() + geom_smooth(method=lm) + xlim(0, 100) +
+  ggtitle("3x3x3 average vs. 6x6x6 average") + xlab("3x3x3 average (seconds)") + ylab("6x6x6 average (seconds)") 
+relate_7 <- ggplot(samp_avg, aes(x=samp_avg$'333', y=samp_avg$'777')) + geom_point() + geom_smooth(method=lm) + xlim(0, 100) +
+  ggtitle("3x3x3 average vs. 7x7x7 average") + xlab("3x3x3 average (seconds)") + ylab("7x7x7 average (seconds)") 
+relate_OH <- ggplot(samp_avg, aes(x=samp_avg$'333', y=samp_avg$'333oh')) + geom_point() + geom_smooth(method=lm) + xlim(0, 150) +
+  ggtitle("3x3x3 average vs. 3x3x3 One Handed average") + xlab("3x3x3 average (seconds)") + ylab("3x3x3 One Handed average (seconds)") 
+print(grid.arrange(relate_3, relate_4, relate_6, relate_7, relate_OH))
+```
+
+Hmm. This still isn't much better, to be honest. It shows that the 3x3x3 average doesn't function as an amazing predictor for everything else. That being said, I'm still gonig to include it in my model. It might only be an interaction term, but that still works for us!
+
+## Building the Model
+
+We have some indication now that our model would work well. Let's build a few simpler ones before we actually build our full model though.
+
+### 3x3x3 vs. 4x4x4 model
+
+We'll use the `lm` function in R to build a simple linear model here.
+```{r 3v4}
+mod34 <- lm(samp_avg$'444' ~ samp_avg$'333', samp_avg)
+broom::tidy(mod34)
+```
+
+Well, the statistics here are promising! Our slopes p-value is $0 < \alpha = 0.05$. It's also a little suspicious though, as it's a little too good. Let's look at some more detailed statistics and plots:
+```{r 3v4_stats}
+mod34_resids <- augment(mod34)
+ggplot(mod34_resids, aes(x=.fitted, y=.resid)) + geom_point() + labs(x="4x4x4 Fitted Averages", y="fitted residuals", title = "3x3x3 Fitted Averages vs. Residuals")
+```
+
+The residuals here are not amazing, but they're not *completely* terrible. For smaller values (where the data is skewed), the residuals are pretty valid. Unfortunately, we can see the spread of the residuals really increase as we increase in solve time.
+
+Just for fun, lets check the 3x3x3 vs 5x5x5 average too to see if they have the same issues.
+
+### 3x3x3 vs. 5x5x5 model
+
+The analysis here is the same as above. Note, I also drop all NA values here. This is important so that we can compare this model to the full model later.
+```{r 3v5}
+samps <- drop_na(select(samp_avg, '333', '444', '555', '333oh', '666', '777'))
+mod35 <- lm(samps$'555'~samps$'333', samps %>% drop_na())
+mod35_resids <- augment(mod35)
+ggplot(mod35_resids, aes(x=.fitted, y=.resid)) + geom_point() + labs(x="5x5x5 Fitted Averages", y="fitted residuals", title = "5x5x5 Fitted Averages vs. Residuals")
+```
+
+Surprisingly, the residuals here actually look a lot better here than with 4x4x4. For lower 3x3x3 averages, everything seems pretty valid. What this means to me is that the slope has a more complicated dependence on 3x3x3, which might be able to be handled by our full model!
+
+### Full Model (No interaction terms)
+
+```{r full_no_interacton}
+  full <- lm(samps$'555' ~ samps$'333' + samps$'444'+samps$'666' + samps$'777' + samps$'333oh', samps)
+  broom::tidy(full)
+```
+If we look at the p-values here, all of them are $< \alpha = 0.05,$ except for One Handed. Let's remove this and run it again. Conceptually, this makes a lot of sense, because of how slightly different it is to everything else.
+```{r no_oh}
+full <- lm(samps$'555' ~ samps$'333' + samps$'444'+samps$'666' + samps$'777', samps)
+  broom::tidy(full)
+```
+Now, all of our p-values are good! They also make a lot more sense than the earlier models did. But is it actually better? We should do an ANOVA test to figure that out.
+
+```{r anova}
+anova(mod35, full)
+```
+There are two indications from this ANOVA test that suggests that this model is better! The first is the F statistic, which is $>> 1$, implying that there is a significant relationship between the 5x5x5 average and any of the other averages. Also, the probability of this model having a larger F value by random chance is $2.2e-16 < \alpha=0.05$.
+
+If we plot the residuals now, we get the following:
+```{r full_no_inter_resid}
+full_resid <- augment(full)
+ggplot(full_resid, aes(x=.fitted, y=.resid)) + geom_point() + labs(x="5x5x5 Fitted Averages", y="fitted residuals", title = "5x5x5 Fitted Averages vs. Residuals")
+
+```
+
+These residuals are pretty good! This means our model without interactions is fairly valid
+
+Just to write it out explicitly, the model gives the following relationship:
+$$555\_avg = 6.23 + 0.76*(333\_avg) + 0.71*(444\_avg) + 0.14*(666\_avg) + 0.06*(777\_avg)$$
+
+### Full Model With Interaction
+
+```{r inter_model}
+full_inter <- lm(samps$'555' ~ samps$'333' *( samps$'444'+samps$'666' + samps$'777'), samps)
+tidy(full_inter)
+
+```
+
+Hmm. Right off the bat, this doesn't look that great. Three of these terms have a p-value that's greater than 0.05, therefore we don't expect them to impact the model much. However, we'll check the residuals here and run an anova test anyways.
+```{r inter_anova}
+anova(full_inter, full)
+```
+
+Once again we see evidence that this model could be better, with a high F and low Pr(>F) values. However, F is only 30.971, which isn't necessarily significantly greater than 1.
+
+```{r inter_resid}
+full_inter_resid <- augment(full_inter)
+ggplot(full_inter_resid, aes(x=.fitted, y=.resid)) + geom_point() + labs(x="5x5x5 Fitted Averages", y="fitted residuals", title = "5x5x5 Fitted Averages vs. Residuals")
+
+```
+
+The spread of the residuals is a little worse here, but it's at best the same. Therefore, I don't really see any reason to use the interaction model here.
+
+### Min averages model
+
+You may remember from the very top of this analysis where I said that we were going to analyze both the average averages and a persons best average. Here's where I'll do that. Much of the analysis leading up to this point is the same, so I'll just get to the final model.
+
+```{r}
+samps <- drop_na(select(min_avgs, '333', '444', '555', '333oh', '666', '777'))
+full_min <- lm(samps$'555' ~ samps$'333' +( samps$'444'+samps$'666' + samps$'777'), samps)
+tidy(full_min)
+```
+
+Again, all the p-values here are less than $\alpha=0.05$, so we expect them to be statistically significant. This is a good indication that our model is accurate. 
+
+```{r min_resid}
+min_resid <- augment(full_min)
+ggplot(min_resid, aes(x=.fitted, y=.resid)) + geom_point() + labs(x="5x5x5 Fitted Averages", y="fitted residuals", title = "5x5x5 Fitted Averages vs. Residuals")
+```
+
+These residuals may *look* worse, but they're actually way better! The range of the graph is smaller than before. This seems to imply that someones best performing averages are more closely linked together than their general/average performance. This model is:
+$$555\_best = 5.62 + 1.392*(333\_avg) + 0.592*(444\_avg) + 0.153(666\_avg) + 0.041*(777\_avg)$$
+
+## Conclusion
+
+Throughout this analysis, we've been attempting to show that there is a relationship between someone's average times to solve various sizes and forms of twisty puzzles. Even more strongly, we've developed a specific equation that can predict somebodies time on one puzzle given all of their other times.
+
+The two equations we've derived are:
+
+$$555\_avg = 6.23 + 0.76*(333\_avg) + 0.71*(444\_avg) + 0.14*(666\_avg) + 0.06*(777\_avg)$$
+$$555\_best = 5.62 + 1.392*(333\_avg) + 0.592*(444\_avg) + 0.153(666\_avg) + 0.041*(777\_avg)$$
+
+We chose to derive it in terms of of the 5x5x5 puzzle average, although the equation can be rederived to solve for any other term. We've shown through visually exploring the data that this analysis makes sense to do.
+
+One important question: does this make conceptual sense? If we plug in some values to this, do we ge what we expect? 
+If we compute the mean of each puzzle, and assume that someone being in the mean for one puzzle means they would also perform around the mean for another puzzle.
+The means for every puzzle in the dataset are as follows:
+
+ * 3x3x3 - 13.073
+ * 4x4x4 - 49.92
+ * 5x5x5 - 93.93
+ * 6x6x6 - 185.98
+ * 7x7x7 - 283.04
+
+Plugging in the remainder of the results yields a time of 89.25 seconds for a 5x5x5 result! This is very very close to the mean 93.93 seconds, which checks out to me. 
+
+By using mulit-variate linear regression, we were able to create an accurate model that could predict times based off of peoples other results. The only real danger here, in my opinion, is overfitting. Furthermore, in context, sometimes people get very good at small puzzles, like the 3x3x3, but never practice the 7x7x7.
+
+Further Reading and Sources:
+
+ * https://www.worldcubeassociation.org/
