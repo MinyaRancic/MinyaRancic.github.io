@@ -1,0 +1,115 @@
+---
+title: "final-project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(tibble)
+library(gridExtra)
+library(grid)
+```
+
+# Competetitve Speedcubing Data Analysis
+
+One thing you may not know about me is that I'm a competitive "speedcuber"! Basically, I solve various types of Rubik's cubes as fast as I can in competitions. We actually run some competitions here at UMD as well! You can find my profile [here](https://www.worldcubeassociation.org/persons/2014RANC01) and learn more here as well.
+
+Cubing Competitions are run in the following way: you solve your cube five times in a "round," and will advance to later rounds based on your average. There are many different events and types of cubes you can solve, including the standard 3x3x3, bigger cubes such as the 4x4x4-7x7x7, and even other types of solving, such as one handed or blindfolded.
+
+There are two equivalent questions that I'm trying to answer here. One question that people oftern have as they progress and improve is, for example,  "what does a sub-20 3x3x3 time coorespond to on a 4x4x4." Equivalently, I'm curious if we can predict somebodies time in other events based off of their time in at least one other event.
+
+## Getting the Data
+
+I first tried scraping the data directly from the World Cubing Associaction's (WCA's) website. Unfortunately, the way the website is laid out isn't very conducive to scraping - I needed everybodies results in one place. Rather than dealing with that, I found a downloadable version of the dataset that the WCA created [from here](https://www.worldcubeassociation.org/results/misc/export.html). I could also have pulled it directly from their API, but that's not really necessary for the sake of this analysis.
+
+Luckily, the WCA has a readily made tab-separated-value file for us with every competition result that has ever happened! Unfortunately, this data is not very friendly for our end goal in its current form - we want to know how one persons results affect each other, but the data is set up so that one result for one event is an entity. We will have to process the data to change this. 
+
+### Reading in the data
+
+```{r read_data}
+results <- read.table(file = "data/WCA_export_Results.tsv", sep='\t', header=TRUE)
+head(avgRanks)
+```
+
+Unfortunately, this is over 1 million observations, which is way too much data to process effectively. Furthermore, we have many data points for each person - preferable, we just want one data point per person. There are two points for each persons results - an average and a best single. I want to analyze the average here, since the single time is more dependant on luck. However, theres' two possible ways we could do this. We can either check the minimum average, which is generally what the community would prefer, or the average of the average, which might be a better metric. I will try both here! First, since there's no year column, we'll have to extract that from the competition name.
+
+### Tidying and Transforming the data
+
+```{r add_year}
+results <- mutate(results, year=stringr::str_extract(competitionId, "\\d{4}"))
+```
+
+The first thing we want to do is remove entities that are "Did Not Finish," "Did Not Start," or "No Result" events. The data set encodes these as -1, -2, and 0, respectively. These manipulate our dataset in a really undesired way, since they're lower than any possible average. It's easiest to just remove these entitites entirely.
+
+```{r remove_bad}
+results <- filter(results, average > 0)
+head(results)
+```
+
+Now, lets filter out every year less than 2017. Here, we're also going to group by name and take every persons maximum average and their average average. This also transforms the entities of the table from being results to being people. We also group by event here, since the average for each event is obviously different, and thats actually what we want to test. Finally, we divide this time by 100, since the time the data set originally uses is in centiseconds. I'm not entirely sure why the WCA made this decision, but I'm going to change it for our analysis here.
+
+```{r filter_dat}
+min_avgs <- filter(results, year >= 2017) %>%
+  group_by(personId, eventId) %>% summarize(avg=min(average)/100)
+avg_avgs <- filter(results, year >= 2017) %>%
+  group_by(personId, eventId) %>% summarize(avg=mean(average)/100)
+head(min_avgs)
+```
+
+There are still about 200,000 observations here, which is a lot but is also a lot better! This data isn't very tidy, so we'd like to transform it in the following way: the primary key should be someones WCA ID. To do this, we can `spread` based on the eventId. We could have started by doing this, but it would have been operating on a much larger data set and taken a very long time then. Note that to do this, we need to assign each person a unique, integer id, as that's how the spread function determines what an entity is. We then remove this attribute, since it's not actually relevant for our analysis.
+
+```{r tidying}
+
+avg_avgs$i <- avg_avgs %>% group_by(personId) %>% group_indices
+min_avgs$i <- min_avgs %>% group_by(personId) %>% group_indices
+min_avgs <- spread(min_avgs, eventId, "avg") %>% select(-i) %>% ungroup()
+avg_avgs <- spread(avg_avgs, eventId, "avg") %>% select(-i) %>% ungroup()
+head(avg_avgs)
+```
+
+Finally, we have a lot of missing attributes here. I'm going to fill these in using a regression imputation later on. I don't want to use the overall mean imputation, because it will be very inaccurate - slower people will have a lower average, while faster people will have a higher one. 
+
+## Exploratory Data Analysis
+
+Before modelling this data, we should try to understand it. First, let's look at the distribution of times across some of the events. My prediction here is that most events will be bimodal, with a peak at beginner-level times and intermediate-tier times. That would be somewhere around 
+
+```{r tidying, fig.width=12}
+samp_avg <- avg_avgs %>% drop_na('333') %>%
+  arrange_at(c('333')) %>%
+  rowid_to_column()
+  ggplot(samp_avg, aes(x=samp_avg$rowid, y=samp_avg$`333`)) + geom_point()
+  dist_3 <- ggplot(samp_avg, aes(x=samp_avg$'333')) + geom_histogram(bins=50)
+  dist_4 <- ggplot(samp_avg, aes(x=samp_avg$'444')) + geom_histogram(bins=50)
+  dist_5 <- ggplot(samp_avg, aes(x=samp_avg$'555')) + geom_histogram(bins=50)
+  dist_6 <- ggplot(samp_avg, aes(x=samp_avg$'666')) + geom_histogram(bins=50)
+  dist_7 <- ggplot(samp_avg, aes(x=samp_avg$'777')) + geom_histogram(bins=50)
+  dist_3oh <- ggplot(samp_avg, aes(x=samp_avg$'333oh')) + geom_histogram(bins=50)
+  print(grid.arrange(dist_3, dist_4, dist_5, dist_6, dist_7, dist_3oh, ncol=2, nrow = 3))
+```
+
+These results aren't quite what I expected, but they still make sense. You can observe the following information for each event:
+ * 3x3x3 - 
+    * Central tendency: ~25 seconds
+    * Spread: The overall range is large(5-200 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
+    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times.
+ * 4x4x4 - ~75 seconds
+    * Central tendency: ~75 seconds
+    * Spread: The overall range is large(20-300 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
+    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times. This is more centralied, though
+ * 5x5x5 - ~100 seconds
+    * Central tendency: ~100 seconds
+    * Spread: The overall range is growing larger now(40-500 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
+    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times. This is more centralied, though
+ * 6x6x6 - ~200 seconds
+    * Central tendency: ~200 seconds
+    * Spread: The overall range is large(20-300 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
+    * Skew: It's definitely skewed to the left - we have many more low times, but a wide range of high times. This is more centralied, though
+ * 7x7x7 - ~275 seconds
+    * Central tendency: ~275 seconds
+    * Spread: The overall range is large(20-300 seconds), but the standard deviation seems pretty small (around 5-10 seconds)
+    * Skew: Interestingly, this data doesn't seem too skewed at all. We have some outliers, but we're good overall
+
